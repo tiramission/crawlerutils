@@ -1,6 +1,10 @@
-from crawlerutils import cacher
-
+from crawlerutils.cacher import Cacher
+import pathlib
 
 if __name__ == "__main__":
-    cacher.init()
-    print(cacher.httpx_get("https://www.baidu.com"))
+    Cacher.register()
+    Cacher.download(
+        url="https://www.baidu.com",
+        file=pathlib.Path("./rel.html"),
+    )
+    Cacher.fix_blob()
