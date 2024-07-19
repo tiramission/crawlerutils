@@ -1,4 +1,5 @@
 import httpx
+import aiohttp
 import yaml
 import pathlib
 import atexit
@@ -82,12 +83,45 @@ class Cacher:
             # 缓存文件不存在
             logger.warning("cache hit, but cache file not exist")
         # 未命中缓存，或者缓存无效
-        resp = httpx.get(
-            *args,
-            **kwargs,
-            url=url,
-            follow_redirects=True,
-        )
+        with httpx.Client() as client:
+            resp = client.get(
+                *args,
+                **kwargs,
+                url=url,
+                follow_redirects=True,
+            )
+        resp.raise_for_status()
+        data_hashed = cls.__save_sha256_data(resp.content)
+        cache_item: CacheItem = {
+            "url": url,
+            "data": data_hashed,
+        }
+        cls.memory_cache[cache_key] = cache_item
+        data_file = cls.__sha256_file(data_hashed)
+        if data_file.is_file():
+            return data_file
+        else:
+            raise Exception("cannot fetch file")
+
+    @classmethod
+    async def __afetch(cls, url: str, *args, **kwargs) -> pathlib.Path:
+        cache_key: str = cls.serialization(url, *args, **kwargs)
+        if cache_key in cls.memory_cache:
+            cache_item = cls.memory_cache[cache_key]
+            logger.info("cache hit, read data")
+            data_file = cls.__sha256_file(cache_item["data"])
+            if data_file.is_file():
+                return data_file
+            # 缓存文件不存在
+            logger.warning("cache hit, but cache file not exist")
+        # 未命中缓存，或者缓存无效
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                *args,
+                **kwargs,
+                url=url,
+                follow_redirects=True,
+            )
         resp.raise_for_status()
         data_hashed = cls.__save_sha256_data(resp.content)
         cache_item: CacheItem = {
@@ -116,3 +150,18 @@ class Cacher:
     def get(cls, url: str, *args, **kwargs) -> bytes:
         return cls.__fetch(url=url, *args, **kwargs).read_bytes()
 
+
+    @classmethod
+    async def adownload(cls, url: str, file: pathlib.Path, *args, **kwargs):
+        origin_file = await cls.__afetch(url=url, *args, **kwargs)
+        try:
+            file.unlink(missing_ok=True)
+            file.hardlink_to(origin_file)
+            file.chmod(0o444)  # 设置文件只读，防止原始文件发生变更
+        except Exception:
+            logger.warning("cannot create hard link, copy file")
+            file.write_bytes(origin_file.read_bytes())
+
+    @classmethod
+    async def aget(cls, url: str, *args, **kwargs) -> bytes:
+        return (await cls.__afetch(url=url, *args, **kwargs)).read_bytes()
