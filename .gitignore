@@ -8,3 +8,7 @@ wheels/
 
 # venv
 .venv
+
+# pytest
+.pytest_cache
+temps
