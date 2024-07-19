@@ -54,12 +54,6 @@ class Cacher:
         logger.info(f"dump memory_cache to {map_yaml}")
         yaml.safe_dump(cls.memory_cache, map_yaml.open("w", encoding="utf-8"))
 
-    @classmethod
-    def __sha256_data(cls, val: str) -> bytes | None:
-        hash_file = cls.blob_directory.joinpath(val)
-        if hash_file.is_file():
-            return hash_file.read_bytes()
-        return None
 
     @classmethod
     def __sha256_file(cls, val: str) -> pathlib.Path:
@@ -72,10 +66,15 @@ class Cacher:
         return hashed
 
     @classmethod
-    def __fetch(cls, url: str, *args, **argv) -> pathlib.Path:
-        url_hashed: str = cal_sha256(url.encode(encoding="utf-8"))
-        if url_hashed in cls.memory_cache:
-            cache_item = cls.memory_cache[url_hashed]
+    def serialization(cls, url: str, *args, **kwargs) -> str:
+        return cal_sha256(url.encode("utf-8"))
+
+
+    @classmethod
+    def __fetch(cls, url: str, *args, **kwargs) -> pathlib.Path:
+        cache_key: str = cls.serialization(url, *args, **kwargs)
+        if cache_key in cls.memory_cache:
+            cache_item = cls.memory_cache[cache_key]
             logger.info("cache hit, read data")
             data_file = cls.__sha256_file(cache_item["data"])
             if data_file.is_file():
@@ -85,7 +84,7 @@ class Cacher:
         # 未命中缓存，或者缓存无效
         resp = httpx.get(
             *args,
-            **argv,
+            **kwargs,
             url=url,
             follow_redirects=True,
         )
@@ -95,7 +94,7 @@ class Cacher:
             "url": url,
             "data": data_hashed,
         }
-        cls.memory_cache[url_hashed] = cache_item
+        cls.memory_cache[cache_key] = cache_item
         data_file = cls.__sha256_file(data_hashed)
         if data_file.is_file():
             return data_file
@@ -103,8 +102,8 @@ class Cacher:
             raise Exception("cannot fetch file")
 
     @classmethod
-    def download(cls, url: str, file: pathlib.Path, *args, **argv) -> bytes:
-        origin_file = cls.__fetch(url=url, *args, **argv)
+    def download(cls, url: str, file: pathlib.Path, *args, **kwargs):
+        origin_file = cls.__fetch(url=url, *args, **kwargs)
         try:
             file.unlink(missing_ok=True)
             file.hardlink_to(origin_file)
@@ -112,3 +111,8 @@ class Cacher:
         except Exception:
             logger.warning("cannot create hard link, copy file")
             file.write_bytes(origin_file.read_bytes())
+
+    @classmethod
+    def get(cls, url: str, *args, **kwargs) -> bytes:
+        return cls.__fetch(url=url, *args, **kwargs).read_bytes()
+

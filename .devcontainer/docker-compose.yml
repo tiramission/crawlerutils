@@ -1,7 +1,4 @@
 services:
   dev:
     image: mcr.microsoft.com/devcontainers/python
-    volumes:
-      - ../..:/workspaces:cached
-
     command: sleep infinity

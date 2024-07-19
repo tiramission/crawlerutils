@@ -2,7 +2,6 @@
 	"name": "develop",
 	"dockerComposeFile": "docker-compose.yml",
 	"service": "dev",
-	"workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
 	"features": {
 		"ghcr.io/schlich/devcontainer-features/rye": {}
 	}
