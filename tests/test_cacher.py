@@ -6,6 +6,7 @@ import pytest
 logger.remove()
 root = Path(__file__).parent.parent
 
+
 def test_cacher():
     Cacher.register()
     result_file = root.joinpath("temps").joinpath("result.html")
@@ -14,6 +15,7 @@ def test_cacher():
     assert result_file.is_file()
     assert Cacher.get("https://www.google.com") == result_file.read_bytes()
     result_file.unlink()
+
 
 @pytest.mark.asyncio
 async def test_async_cacher():

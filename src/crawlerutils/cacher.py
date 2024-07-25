@@ -55,7 +55,6 @@ class Cacher:
         logger.info(f"dump memory_cache to {map_yaml}")
         yaml.safe_dump(cls.memory_cache, map_yaml.open("w", encoding="utf-8"))
 
-
     @classmethod
     def __sha256_file(cls, val: str) -> pathlib.Path:
         return cls.blob_directory.joinpath(val)
@@ -69,7 +68,6 @@ class Cacher:
     @classmethod
     def serialization(cls, url: str, *args, **kwargs) -> str:
         return cal_sha256(url.encode("utf-8"))
-
 
     @classmethod
     def __fetch(cls, url: str, *args, **kwargs) -> pathlib.Path:
@@ -136,12 +134,14 @@ class Cacher:
             raise Exception("cannot fetch file")
 
     @classmethod
-    def download(cls, url: str, file: pathlib.Path, *args, **kwargs):
+    def download(
+        cls, url: str, file: pathlib.Path, lockfile: bool = True, *args, **kwargs
+    ):
         origin_file = cls.__fetch(url=url, *args, **kwargs)
         try:
             file.unlink(missing_ok=True)
             file.hardlink_to(origin_file)
-            file.chmod(0o444)  # 设置文件只读，防止原始文件发生变更
+            lockfile and file.chmod(0o444)  # 设置文件只读，防止原始文件发生变更
         except Exception:
             logger.warning("cannot create hard link, copy file")
             file.write_bytes(origin_file.read_bytes())
@@ -149,7 +149,6 @@ class Cacher:
     @classmethod
     def get(cls, url: str, *args, **kwargs) -> bytes:
         return cls.__fetch(url=url, *args, **kwargs).read_bytes()
-
 
     @classmethod
     async def adownload(cls, url: str, file: pathlib.Path, *args, **kwargs):
