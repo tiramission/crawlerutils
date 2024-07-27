@@ -1,11 +1,12 @@
+from weakref import proxy
 import httpx
-import aiohttp
 import yaml
 import pathlib
 import atexit
 import hashlib
 import typing
 from loguru import logger
+from tenacity import retry, stop_after_attempt, wait_fixed
 
 
 from .config import CACHE_DIRECTORY
@@ -24,6 +25,7 @@ class Cacher:
     memory_cache: dict[str, CacheItem]
     cache_directory: pathlib.Path = CACHE_DIRECTORY.joinpath("cacher")
     blob_directory: pathlib.Path = CACHE_DIRECTORY.joinpath("blob")
+    proxy: str | None = None
 
     @classmethod
     def fix_blob(cls):
@@ -36,9 +38,10 @@ class Cacher:
                     f.unlink()
 
     @classmethod
-    def register(cls):
+    def register(cls, proxy: str = None):
         cls.cache_directory.mkdir(parents=True, exist_ok=True)
         cls.blob_directory.mkdir(parents=True, exist_ok=True)
+        cls.proxy = proxy
 
         map_yaml = cls.cache_directory.joinpath("mapping.yaml")
         if map_yaml.is_file():
@@ -70,6 +73,7 @@ class Cacher:
         return cal_sha256(url.encode("utf-8"))
 
     @classmethod
+    @retry(stop=stop_after_attempt(5), wait=wait_fixed(3))
     def __fetch(cls, url: str, *args, **kwargs) -> pathlib.Path:
         cache_key: str = cls.serialization(url, *args, **kwargs)
         if cache_key in cls.memory_cache:
@@ -81,7 +85,7 @@ class Cacher:
             # 缓存文件不存在
             logger.warning("cache hit, but cache file not exist")
         # 未命中缓存，或者缓存无效
-        with httpx.Client() as client:
+        with httpx.Client(proxy=cls.proxy) as client:
             resp = client.get(
                 *args,
                 **kwargs,
@@ -102,6 +106,7 @@ class Cacher:
             raise Exception("cannot fetch file")
 
     @classmethod
+    @retry(stop=stop_after_attempt(5), wait=wait_fixed(3))
     async def __afetch(cls, url: str, *args, **kwargs) -> pathlib.Path:
         cache_key: str = cls.serialization(url, *args, **kwargs)
         if cache_key in cls.memory_cache:
@@ -113,7 +118,7 @@ class Cacher:
             # 缓存文件不存在
             logger.warning("cache hit, but cache file not exist")
         # 未命中缓存，或者缓存无效
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(proxy=cls.proxy) as client:
             resp = await client.get(
                 *args,
                 **kwargs,
@@ -134,14 +139,11 @@ class Cacher:
             raise Exception("cannot fetch file")
 
     @classmethod
-    def download(
-        cls, url: str, file: pathlib.Path, lockfile: bool = True, *args, **kwargs
-    ):
+    def download(cls, url: str, file: pathlib.Path, *args, **kwargs):
         origin_file = cls.__fetch(url=url, *args, **kwargs)
         try:
             file.unlink(missing_ok=True)
             file.hardlink_to(origin_file)
-            lockfile and file.chmod(0o444)  # 设置文件只读，防止原始文件发生变更
         except Exception:
             logger.warning("cannot create hard link, copy file")
             file.write_bytes(origin_file.read_bytes())
@@ -156,7 +158,6 @@ class Cacher:
         try:
             file.unlink(missing_ok=True)
             file.hardlink_to(origin_file)
-            file.chmod(0o444)  # 设置文件只读，防止原始文件发生变更
         except Exception:
             logger.warning("cannot create hard link, copy file")
             file.write_bytes(origin_file.read_bytes())
