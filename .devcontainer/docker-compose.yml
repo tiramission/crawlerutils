@@ -2,3 +2,5 @@ services:
   dev:
     image: mcr.microsoft.com/devcontainers/python
     command: sleep infinity
+    volumes:
+      - ..:/workspace

@@ -1,4 +1,3 @@
-from weakref import proxy
 import httpx
 import yaml
 import pathlib
