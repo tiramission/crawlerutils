@@ -23,5 +23,5 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
-      - uses: wntrblm/nox@v1.19.1
+      - uses: wntrblm/nox@2024.10.09
       - run: nox --non-interactive --error-on-missing-interpreter --session tests
