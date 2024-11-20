@@ -8,83 +8,86 @@ from loguru import logger
 from tenacity import retry, stop_after_attempt, wait_fixed
 
 
-from .config import CACHE_DIRECTORY
+from .config import DEFAULT_CACHE_DIRECTORY
+
+class utils:
+    @staticmethod
+    def cal_sha256(data: bytes) -> str:
+        return hashlib.sha256(data).hexdigest()
+
+    @staticmethod
+    def serialization(url: str, *args, **kwargs) -> str:
+        return utils.cal_sha256(url.encode("utf-8"))
 
 
-def cal_sha256(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
+class CacheItemRef(typing.TypedDict):
+    url: str  # origin_url
+    args: list  # args
+    kwargs: dict # kwargs
 
 
 class CacheItem(typing.TypedDict):
-    url: str  # origin_url
     data: str  # hash
+    ref: CacheItemRef # hash from
 
 
 class Cacher:
-    memory_cache: dict[str, CacheItem]
-    cache_directory: pathlib.Path = CACHE_DIRECTORY.joinpath("cacher")
-    blob_directory: pathlib.Path = CACHE_DIRECTORY.joinpath("blob")
-    proxy: str | None = None
+    def __init__(self, cache_dir: pathlib.Path = DEFAULT_CACHE_DIRECTORY, proxy: str | None = None) -> None:
+        self.memory_cache: dict[str, CacheItem]
+        self.cache_directory: pathlib.Path = cache_dir.joinpath("cacher")
+        self.blob_directory: pathlib.Path = cache_dir.joinpath("blob")
+        self.proxy: str | None = proxy
 
-    @classmethod
-    def fix_blob(cls):
-        if not cls.blob_directory.is_dir():
+    def fix_blob(self):
+        if not self.blob_directory.is_dir():
             logger.info("skip fix blob directory")
-        for f in cls.blob_directory.iterdir():
+        for f in self.blob_directory.iterdir():
             if f.is_file():
-                if cal_sha256(f.read_bytes()) != f.name:
+                if utils.cal_sha256(f.read_bytes()) != f.name:
                     logger.info(f"blob file {f} hash is uncorrect")
                     f.unlink()
 
-    @classmethod
-    def register(cls, proxy: str = None):
-        cls.cache_directory.mkdir(parents=True, exist_ok=True)
-        cls.blob_directory.mkdir(parents=True, exist_ok=True)
-        cls.proxy = proxy
+    def register(self, proxy: str = None):
+        self.cache_directory.mkdir(parents=True, exist_ok=True)
+        self.blob_directory.mkdir(parents=True, exist_ok=True)
 
-        map_yaml = cls.cache_directory.joinpath("mapping.yaml")
+        map_yaml = self.cache_directory.joinpath("mapping.yaml")
         if map_yaml.is_file():
-            cls.memory_cache = yaml.safe_load(map_yaml.open(encoding="utf-8"))
+            self.memory_cache = yaml.safe_load(map_yaml.open(encoding="utf-8"))
         else:
-            cls.memory_cache = {}
+            self.memory_cache = {}
 
         # 注册退出回调
-        atexit.register(cls.__commit)
+        atexit.register(self.__commit)
 
-    @classmethod
-    def __commit(cls):
-        map_yaml = cls.cache_directory.joinpath("mapping.yaml")
+
+    def __commit(self):
+        map_yaml = self.cache_directory.joinpath("mapping.yaml")
         logger.info(f"dump memory_cache to {map_yaml}")
-        yaml.safe_dump(cls.memory_cache, map_yaml.open("w", encoding="utf-8"))
+        yaml.safe_dump(self.memory_cache, map_yaml.open("w", encoding="utf-8"))
 
-    @classmethod
-    def __sha256_file(cls, val: str) -> pathlib.Path:
-        return cls.blob_directory.joinpath(val)
+    def __sha256_file(self, val: str) -> pathlib.Path:
+        return self.blob_directory.joinpath(val)
 
-    @classmethod
-    def __save_sha256_data(cls, data: bytes) -> str:
-        hashed = cal_sha256(data)
-        cls.blob_directory.joinpath(hashed).write_bytes(data)
+    def __save_sha256_data(self, data: bytes) -> str:
+        hashed = utils.cal_sha256(data)
+        self.blob_directory.joinpath(hashed).write_bytes(data)
         return hashed
 
-    @classmethod
-    def serialization(cls, url: str, *args, **kwargs) -> str:
-        return cal_sha256(url.encode("utf-8"))
 
-    @classmethod
     @retry(stop=stop_after_attempt(5), wait=wait_fixed(3))
-    def __fetch(cls, url: str, *args, **kwargs) -> pathlib.Path:
-        cache_key: str = cls.serialization(url, *args, **kwargs)
-        if cache_key in cls.memory_cache:
-            cache_item = cls.memory_cache[cache_key]
+    def __fetch(self, url: str, *args, **kwargs) -> pathlib.Path:
+        cache_key: str = utils.serialization(url, *args, **kwargs)
+        if cache_key in self.memory_cache:
+            cache_item = self.memory_cache[cache_key]
             logger.info("cache hit, read data")
-            data_file = cls.__sha256_file(cache_item["data"])
+            data_file = self.__sha256_file(cache_item["data"])
             if data_file.is_file():
                 return data_file
             # 缓存文件不存在
             logger.warning("cache hit, but cache file not exist")
         # 未命中缓存，或者缓存无效
-        with httpx.Client(proxy=cls.proxy) as client:
+        with httpx.Client(proxy=self.proxy) as client:
             resp = client.get(
                 *args,
                 **kwargs,
@@ -92,32 +95,31 @@ class Cacher:
                 follow_redirects=True,
             )
         resp.raise_for_status()
-        data_hashed = cls.__save_sha256_data(resp.content)
+        data_hashed = self.__save_sha256_data(resp.content)
         cache_item: CacheItem = {
             "url": url,
             "data": data_hashed,
         }
-        cls.memory_cache[cache_key] = cache_item
-        data_file = cls.__sha256_file(data_hashed)
+        self.memory_cache[cache_key] = cache_item
+        data_file = self.__sha256_file(data_hashed)
         if data_file.is_file():
             return data_file
         else:
             raise Exception("cannot fetch file")
 
-    @classmethod
     @retry(stop=stop_after_attempt(5), wait=wait_fixed(3))
-    async def __afetch(cls, url: str, *args, **kwargs) -> pathlib.Path:
-        cache_key: str = cls.serialization(url, *args, **kwargs)
-        if cache_key in cls.memory_cache:
-            cache_item = cls.memory_cache[cache_key]
+    async def __afetch(self, url: str, *args, **kwargs) -> pathlib.Path:
+        cache_key: str = utils.serialization(url, *args, **kwargs)
+        if cache_key in self.memory_cache:
+            cache_item = self.memory_cache[cache_key]
             logger.info("cache hit, read data")
-            data_file = cls.__sha256_file(cache_item["data"])
+            data_file = self.__sha256_file(cache_item["data"])
             if data_file.is_file():
                 return data_file
             # 缓存文件不存在
             logger.warning("cache hit, but cache file not exist")
         # 未命中缓存，或者缓存无效
-        async with httpx.AsyncClient(proxy=cls.proxy) as client:
+        async with httpx.AsyncClient(proxy=self.proxy) as client:
             resp = await client.get(
                 *args,
                 **kwargs,
@@ -125,21 +127,24 @@ class Cacher:
                 follow_redirects=True,
             )
         resp.raise_for_status()
-        data_hashed = cls.__save_sha256_data(resp.content)
+        data_hashed = self.__save_sha256_data(resp.content)
         cache_item: CacheItem = {
-            "url": url,
             "data": data_hashed,
+            "ref": {
+                "url": url,
+                "args": args,
+                "kwargs": kwargs,
+            }
         }
-        cls.memory_cache[cache_key] = cache_item
-        data_file = cls.__sha256_file(data_hashed)
+        self.memory_cache[cache_key] = cache_item
+        data_file = self.__sha256_file(data_hashed)
         if data_file.is_file():
             return data_file
         else:
             raise Exception("cannot fetch file")
 
-    @classmethod
-    def download(cls, url: str, file: pathlib.Path, *args, **kwargs):
-        origin_file = cls.__fetch(url=url, *args, **kwargs)
+    def download(self, url: str, file: pathlib.Path, *args, **kwargs):
+        origin_file = self.__fetch(url=url, *args, **kwargs)
         try:
             file.unlink(missing_ok=True)
             file.hardlink_to(origin_file)
@@ -147,13 +152,11 @@ class Cacher:
             logger.warning("cannot create hard link, copy file")
             file.write_bytes(origin_file.read_bytes())
 
-    @classmethod
-    def get(cls, url: str, *args, **kwargs) -> bytes:
-        return cls.__fetch(url=url, *args, **kwargs).read_bytes()
+    def get(self, url: str, *args, **kwargs) -> bytes:
+        return self.__fetch(url=url, *args, **kwargs).read_bytes()
 
-    @classmethod
-    async def adownload(cls, url: str, file: pathlib.Path, *args, **kwargs):
-        origin_file = await cls.__afetch(url=url, *args, **kwargs)
+    async def adownload(self, url: str, file: pathlib.Path, *args, **kwargs):
+        origin_file = await self.__afetch(url=url, *args, **kwargs)
         try:
             file.unlink(missing_ok=True)
             file.hardlink_to(origin_file)
@@ -161,6 +164,5 @@ class Cacher:
             logger.warning("cannot create hard link, copy file")
             file.write_bytes(origin_file.read_bytes())
 
-    @classmethod
-    async def aget(cls, url: str, *args, **kwargs) -> bytes:
-        return (await cls.__afetch(url=url, *args, **kwargs)).read_bytes()
+    async def aget(self, url: str, *args, **kwargs) -> bytes:
+        return (await self.__afetch(url=url, *args, **kwargs)).read_bytes()
