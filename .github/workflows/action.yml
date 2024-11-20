@@ -1,0 +1,27 @@
+name: Run Nox
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+env:
+  FORCE_COLOR: "1"
+
+jobs:
+  tests:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os:
+          - ubuntu-22.04
+          - ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - uses: wntrblm/nox@v1.19.1
+      - run: nox --non-interactive --error-on-missing-interpreter --session tests
