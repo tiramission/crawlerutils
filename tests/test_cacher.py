@@ -19,7 +19,7 @@ async def test_async_cacher():
     result_file.parent.mkdir(parents=True, exist_ok=True)
     await c.adownload(url="https://www.google.com", file=result_file)
     assert result_file.is_file()
-    assert (await c.aget("https://www.google.com")) == result_file.read_bytes()
+    assert (await c.aget("https://www.baidu.com")) == result_file.read_bytes()
     result_file.unlink()
 
 
@@ -28,5 +28,5 @@ def test_cacher():
     result_file.parent.mkdir(parents=True, exist_ok=True)
     c.download(url="https://www.google.com", file=result_file)
     assert result_file.is_file()
-    assert c.get("https://www.google.com") == result_file.read_bytes()
+    assert c.get("https://www.baidu.com") == result_file.read_bytes()
     result_file.unlink()
